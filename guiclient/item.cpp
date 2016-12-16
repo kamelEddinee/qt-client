@@ -171,7 +171,7 @@ item::item(QWidget* parent, const char* name, Qt::WindowFlags fl)
   _itemsrc->addColumn(tr("Vendor Item"), _itemColumn, Qt::AlignLeft, true, "itemsrc_vend_item_number" );
   _itemsrc->addColumn(tr("Manufacturer"), _itemColumn, Qt::AlignLeft, true, "itemsrc_manuf_name" );
   _itemsrc->addColumn(tr("Manuf. Item#"), _itemColumn, Qt::AlignLeft, true, "itemsrc_manuf_item_number" );
-  _itemsrc->addColumn(tr("Default"),      _dateColumn,   Qt::AlignCenter, true, "default");
+  _itemsrc->addColumn(tr("Default"),      _dateColumn,   Qt::AlignCenter, true, "itemsrc_default");
 
   _itemalias->addColumn(tr("Alias Number"),    _itemColumn, Qt::AlignLeft,   true, "itemalias_number"  );
   _itemalias->addColumn(tr("Account"),         _itemColumn, Qt::AlignLeft,   true, "crmacct_name"  );
@@ -190,8 +190,8 @@ item::item(QWidget* parent, const char* name, Qt::WindowFlags fl)
   _itemSite->addColumn(tr("Active"),        _dateColumn, Qt::AlignCenter, true, "itemsite_active" );
   _itemSite->addColumn(tr("Site"),          _whsColumn,  Qt::AlignCenter, true, "warehous_code" );
   _itemSite->addColumn(tr("Description"),   -1,          Qt::AlignLeft, true, "warehous_descrip"   );
-  _itemSite->addColumn(tr("Cntrl. Method"), _itemColumn, Qt::AlignCenter, true, "itemsite_controlmethod" );
-  _itemSite->addColumn(tr("Cost Method"),   _itemColumn, Qt::AlignCenter, true, "itemsite_costmethod" );
+  _itemSite->addColumn(tr("Cntrl. Method"), _itemColumn, Qt::AlignCenter, true, "controlmethod" );
+  _itemSite->addColumn(tr("Cost Method"),   _itemColumn, Qt::AlignCenter, true, "costmethod" );
   _itemSite->addColumn(tr("Avg. Cost"),     _moneyColumn, Qt::AlignRight, true, "avgcost" );
   _itemSite->setDragString("itemsiteid=");
 
@@ -605,6 +605,23 @@ void item::sSave()
     {
       errors << GuiErrorCheck(true, _itemNumber,
                               tr("You may not rename this Item to the entered Item Number as it is in use by another Item."));
+    }
+  }
+
+  if (_metrics->boolean("EnforceUniqueBarcodes"))
+  {
+    itemSave.prepare( "SELECT EXISTS(SELECT 1 FROM item "
+                      "WHERE ((item_active) "
+                      "AND (item_upccode = :item_upccode) "
+                      "AND (item_id <> :item_id))) AS result;");
+    itemSave.bindValue(":item_id", _itemid);
+    itemSave.bindValue(":item_upccode", _upcCode->text());
+    itemSave.exec();
+    if (itemSave.first() && itemSave.value("result").toBool())
+    {
+      errors << GuiErrorCheck(true, _upcCode,
+                              tr("You may not use this Item Bar Code (%1) as it is used by another Item.")
+                                .arg(_upcCode->text()));
     }
   }
   
@@ -1722,38 +1739,21 @@ void item::sDeleteItemSite()
 void item::sFillListItemSites()
 {
   XSqlQuery itemFillListItemSites;
-  QString sql( "SELECT itemsite_id, itemsite_active,"
-               "       warehous_code, warehous_descrip, "
-               "       CASE itemsite_controlmethod WHEN 'R' THEN :regular"
-               "                                   WHEN 'N' THEN :none"
-               "                                   WHEN 'L' THEN :lotNumber"
-               "                                   WHEN 'S' THEN :serialNumber"
-               "       END AS itemsite_controlmethod,"
-               "       CASE itemsite_costmethod WHEN 'S' THEN :standard"
-               "                                WHEN 'N' THEN :none"
-               "                                WHEN 'J' THEN :job"
-               "                                WHEN 'A' THEN :average"
-               "       END AS itemsite_costmethod,"
-               "       CASE WHEN (itemsite_costmethod='A') THEN avgCost(itemsite_id) END AS avgcost,"
-               "       'curr' AS avgcost_xtnumericrole,"
-               "       :na AS avgcost_xtnullrole "
-               "FROM itemsite, item, whsinfo "
-               "WHERE ( (itemsite_item_id=item_id)"
-               " AND (itemsite_warehous_id=warehous_id) "
-               " AND (item_id=:item_id) ) "
-               "ORDER BY item_number, warehous_code;" );
+  MetaSQLQuery mql = mqlLoad("itemSites", "detail");
 
-  itemFillListItemSites.prepare(sql);
-  itemFillListItemSites.bindValue(":item_id", _itemid);
-  itemFillListItemSites.bindValue(":regular", tr("Regular"));
-  itemFillListItemSites.bindValue(":none", tr("None"));
-  itemFillListItemSites.bindValue(":lotNumber", tr("Lot #"));
-  itemFillListItemSites.bindValue(":serialNumber", tr("Serial #"));
-  itemFillListItemSites.bindValue(":standard", tr("Standard"));
-  itemFillListItemSites.bindValue(":job", tr("Job"));
-  itemFillListItemSites.bindValue(":average", tr("Average"));
-  itemFillListItemSites.bindValue(":na", tr("N/A"));
-  itemFillListItemSites.exec();
+  ParameterList params;
+  params.append("item_id", _itemid);
+  params.append("regular", tr("Regular"));
+  params.append("none", tr("None"));
+  params.append("lot", tr("Lot #"));
+  params.append("serial", tr("Serial #"));
+  params.append("standard", tr("Standard"));
+  params.append("job", tr("Job"));
+  params.append("average", tr("Average"));
+  params.append("na", tr("N/A"));
+  params.append("never", tr("Never"));
+
+  itemFillListItemSites  = mql.toQuery(params);
   _itemSite->populate(itemFillListItemSites);
 }
 
@@ -2080,21 +2080,9 @@ void item::sHandleRightButtons()
 void item::sFillSourceList()
 {
   XSqlQuery itemFillSourceList;
-  QString sql( "SELECT itemsrc_id, vend_number,"
-               "       vend_name, itemsrc_vend_item_number, "
-	       "       itemsrc_active, itemsrc_manuf_name, "
-               "       itemsrc_manuf_item_number, "
-			   "       CASE WHEN itemsrc_default = 'true' THEN 'Yes' "
-			   "       ELSE 'No' "
-			   "       END AS default "
-               "FROM item, vendinfo, itemsrc "
-               "WHERE ( (itemsrc_item_id=item_id)"
-               " AND (itemsrc_vend_id=vend_id)"
-	       " AND (itemsrc_item_id=<? value(\"item_id\") ?>) "
-               ") ORDER BY vend_number, vend_name;" );
+  MetaSQLQuery mql = mqlLoad("itemSources", "detail");
                
   ParameterList params;
-  MetaSQLQuery mql(sql);
   params.append("item_id", _itemid);
   itemFillSourceList = mql.toQuery(params);
   _itemsrc->populate(itemFillSourceList);

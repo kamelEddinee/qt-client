@@ -1,7 +1,7 @@
 /*
  * This file is part of the xTuple ERP: PostBooks Edition, a free and
  * open source Enterprise Resource Planning software suite,
- * Copyright (c) 1999-2014 by OpenMFG LLC, d/b/a xTuple.
+ * Copyright (c) 1999-2016 by OpenMFG LLC, d/b/a xTuple.
  * It is licensed to you under the Common Public Attribution License
  * version 1.0, the full text of which (including xTuple-specific Exhibits)
  * is available at www.xtuple.com/CPAL.  By using this software, you agree
@@ -61,7 +61,6 @@ XComboBoxPrivate::XComboBoxPrivate(XComboBox *pParent)
     _default(XComboBox::First),
     _editButton(0),
     _label(0),
-    _lastId(-1),
     _parent(pParent),
     _popupCounter(0),
     _mapper(0)
@@ -289,6 +288,7 @@ void XComboBox::init()
   insertEditor(WarehouseCommentTypes,"commentTypes","MaintainCommentTypes");
   insertEditor(WoProjects,"projects","MaintainAllProjects");
   insertEditor(WorkCenters,"workCenters","MaintainWorkCenters");
+  insertEditor(WorkCentersActive,"workCenters","MaintainWorkCenters");
   insertEditor(WorkOrderCommentTypes,"commentTypes","MaintainCommentTypes");
 }
 
@@ -1049,6 +1049,13 @@ void XComboBox::setType(XComboBoxTypes pType)
                   "ORDER BY wrkcnt_code;" );
       break;
 
+    case WorkCentersActive:
+      query.exec( "SELECT wrkcnt_id, (wrkcnt_code || '-' || wrkcnt_descrip), wrkcnt_code"
+                 "  FROM xtmfg.wrkcnt "
+                 " WHERE (wrkcnt_active) "
+                 "ORDER BY wrkcnt_code;" );
+      break;
+      
     case CRMAccounts:
       setAllowNull(true);
       query.exec( "SELECT crmacct_id, (crmacct_number || '-' || crmacct_name), crmacct_number"
@@ -1255,12 +1262,11 @@ void XComboBox::setCode(const QString &pString)
       if (_data->_codes.at(counter) == pString)
       {
         if (DEBUG)
-          qDebug("%s::setCode(%s) found at %d with _ids.count %d & _lastId %d",
-                 objectName().toLatin1().data(), pString.toLatin1().data(),
-                 counter, _data->_ids.count(), _data->_lastId);
-        setCurrentIndex(counter);
+          qDebug("%s::setCode(%s) found at %d with _ids.count %d & id %d",
+                 qPrintable(objectName()), qPrintable(pString),
+                 counter, _data->_ids.count(), id());
 
-        if (_data->_ids.count() && _data->_lastId!=_data->_ids.at(counter))
+        if (_data->_ids.count() && id()!=_data->_ids.at(counter))
           setId(_data->_ids.at(counter));
 
         return;
@@ -1313,11 +1319,9 @@ void XComboBox::setId(int pTarget)
       {
         if (_data->_ids.at(counter) == id)
         {
-          setCurrentIndex(counter);
-
-          if(_data->_lastId!=id)
+          if(this->id()!=id)
           {
-            _data->_lastId = id;
+            setCurrentIndex(counter);
             updateMapperData();
             emit newID(pTarget);
             emit valid(true);
@@ -1337,11 +1341,9 @@ void XComboBox::setId(int pTarget)
     {
       if (_data->_ids.at(counter) == pTarget)
       {
-        setCurrentIndex(counter);
-
-        if(_data->_lastId!=pTarget)
+        if(id()!=pTarget)
         {
-          _data->_lastId = pTarget;
+          setCurrentIndex(counter);
           updateMapperData();
           emit newID(pTarget);
           emit valid(true);
@@ -1406,8 +1408,6 @@ void XComboBox::setNull()
 {
   if (allowNull())
   {
-    _data->_lastId = -1;
-
     setCurrentIndex(0);
     updateMapperData();
     emit newID(-1);
@@ -1473,8 +1473,8 @@ void XComboBox::populate(XSqlQuery pQuery, int pSelected)
 
   // TODO: why doesn't setId() handle the following as expected? {
   updateMapperData();
-  emit newID(_data->_lastId);
-  emit valid((_data->_lastId != -1));
+  emit newID(id());
+  emit valid(isValid());
   // } end why
 }
 
@@ -1566,18 +1566,16 @@ bool XComboBox::isValid() const
 void XComboBox::sHandleNewIndex(int pIndex)
 {
   if (DEBUG)
-    qDebug("%s::sHandleNewIndex(%d)",objectName().toLatin1().data(), pIndex);
+    qDebug() << objectName() << "::sHandleNewIndex" << pIndex << "/" << id();
 
-  if ((pIndex >= 0) && (pIndex < _data->_ids.count()) &&
-      (_data->_ids.at(pIndex) != _data->_lastId))
+  if (pIndex >= 0 && pIndex < _data->_ids.count())
   {
-    _data->_lastId = _data->_ids.at(pIndex);
     updateMapperData();
-    emit newID(_data->_lastId);
+    emit newID(_data->_ids.at(pIndex));
 
     if (DEBUG)
-      qDebug("%s::sHandleNewIndex() emitted %d",
-             objectName().toLatin1().data(), _data->_lastId);
+      qDebug() << objectName() << "::sHandleNewIndex emitted"
+               << _data->_ids.at(pIndex);
 
     if (allowNull())
     {
@@ -1587,8 +1585,7 @@ void XComboBox::sHandleNewIndex(int pIndex)
   }
 
   if (DEBUG)
-    qDebug("%s::sHandleNewIndex() returning",
-           objectName().toLatin1().data());
+    qDebug() << objectName() << "::sHandleNewIndex() returning";
 }
 
 void XComboBox::mousePressEvent(QMouseEvent *event)
@@ -1801,6 +1798,7 @@ void setupXComboBox(QScriptEngine *engine)
   widget.setProperty("VendorTypes",          QScriptValue(engine, XComboBox::VendorTypes),          QScriptValue::ReadOnly | QScriptValue::Undeletable);
   widget.setProperty("WoProjects",           QScriptValue(engine, XComboBox::WoProjects),           QScriptValue::ReadOnly | QScriptValue::Undeletable);
   widget.setProperty("WorkCenters",          QScriptValue(engine, XComboBox::WorkCenters),          QScriptValue::ReadOnly | QScriptValue::Undeletable);
+  widget.setProperty("WorkCentersActive",    QScriptValue(engine, XComboBox::WorkCentersActive),    QScriptValue::ReadOnly | QScriptValue::Undeletable);
 
   engine->globalObject().setProperty("XComboBox", widget, QScriptValue::ReadOnly | QScriptValue::Undeletable);
 }

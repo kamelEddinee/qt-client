@@ -807,6 +807,9 @@ to be bound by its terms.</comment>
            </property>
            <item>
             <widget class="QPushButton" name="_new">
+             <property name="enabled">
+              <bool>false</bool>
+             </property>
              <property name="text">
               <string>&amp;New</string>
              </property>

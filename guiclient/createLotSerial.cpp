@@ -210,9 +210,12 @@ void createLotSerial::sHandleCharacteristics()
     {
         XSqlQuery charQuery;
         charQuery.prepare(QString("SELECT DISTINCT char.char_name, char.char_type, charass.charass_value "
-                          " FROM charass INNER JOIN char ON charass.charass_char_id=char.char_id "
-                          " WHERE charass.charass_target_type='LS' AND "
-                          " charass.charass_target_id=%1 "
+                          " FROM charass "
+                          " JOIN char ON (charass_char_id = char_id) "
+                          " JOIN charuse ON (charuse_char_id = char_id) "
+                          " WHERE ((charass.charass_target_type = 'LS') "
+                          "  AND   (charass.charass_target_id=%1) "
+                          "  AND   (charuse_target_type = 'LS')) "
                           " ORDER BY char.char_name ASC").arg(ls_id));
         success = charQuery.exec();
         if (!success)
@@ -420,14 +423,15 @@ void createLotSerial::sAssign()
   }
 
   QString sql;
+  int itemlocdist_id = -1;
   if (_preassigned)
-    sql = "SELECT createlotserial(:itemsite_id,:lotserial,:itemlocseries,lsdetail_source_type,lsdetail_source_id,:itemlocdist_id,:qty,:expiration,:warranty) "
+    sql = "SELECT createlotserial(:itemsite_id,:lotserial,:itemlocseries,lsdetail_source_type,lsdetail_source_id,:itemlocdist_id,:qty,:expiration,:warranty) AS id "
           "FROM lsdetail,itemlocdist "
           "WHERE ((lsdetail_id=:lsdetail_id)"
           "AND (itemlocdist_id=:itemlocdist_id));";
 
   else
-    sql = "SELECT createlotserial(:itemsite_id,:lotserial,:itemlocseries,'I',NULL,itemlocdist_id,:qty,:expiration,:warranty) "
+    sql = "SELECT createlotserial(:itemsite_id,:lotserial,:itemlocseries,'I',NULL,itemlocdist_id,:qty,:expiration,:warranty) AS id "
           "FROM itemlocdist "
           "WHERE (itemlocdist_id=:itemlocdist_id);";
 
@@ -445,6 +449,8 @@ void createLotSerial::sAssign()
     createAssign.bindValue(":warranty", _warranty->date());
   createAssign.bindValue(":itemlocdist_id", _itemlocdistid);
   createAssign.exec();
+  if (createAssign.first())
+    itemlocdist_id = createAssign.value("id").toInt();
   if (ErrorReporter::error(QtCriticalMsg, this, tr("Error Saving Lot/Serial Information"),
                                 createAssign, __FILE__, __LINE__))
   {
@@ -457,11 +463,11 @@ void createLotSerial::sAssign()
        * next ls_id.  Fetch the last ls_id */
       int ls_id = -1;
       XSqlQuery ls_id_query;
-      ls_id_query.prepare("SELECT ls_id FROM ls WHERE ls_number=:lotserial");
-      ls_id_query.bindValue(":lotserial", _lotSerial->currentText().toUpper());
+      ls_id_query.prepare("SELECT itemlocdist_ls_id FROM itemlocdist WHERE itemlocdist_id=:itemlocdist_id");
+      ls_id_query.bindValue(":itemlocdist_id", itemlocdist_id);
       ls_id_query.exec();
       if (ls_id_query.first()) {
-          ls_id = ls_id_query.value("ls_id").toInt();
+          ls_id = ls_id_query.value("itemlocdist_ls_id").toInt();
           _lschars.updateLotCharacteristics(ls_id, _charWidgets);
       }
   }
